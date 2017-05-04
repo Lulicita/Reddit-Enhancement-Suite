@@ -1,0 +1,123 @@
+// ==UserScript==
+// @name			Reddit: Highlight New Comments v3
+// @description	Highlights comments on Reddit that are new since your last visit.
+// @author		Chris H (Zren / Shade), Nathan Sweet
+// @icon			https://reddit.com/favicon.ico
+// @namespace	http://xshade.ca
+// @version		1
+// @include		/https?:\/\/((www|pay|[a-z]{2})\.)?reddit\.com\/r\/[a-zA-Z0-9]+\/comments\/.*/
+// @grant		GM_addStyle
+// ==/UserScript==
+
+// This is a GreaseMonkey user script that highlights comments on Reddit that are new since your last visit.
+// Based on: https://openuserjs.org/scripts/Zren/Reddit_Highlight_New_Comments/source
+
+(function () {
+	// You can remove .res-commentBoxes if you're not using RES.
+	var style = " \
+.new-comment .usertext-body { \
+background-color: transparent; \
+border: 0; \
+margin: 0; \
+} \
+\
+.res-commentBoxes .comment.new-comment, \
+.res-commentBoxes .comment .comment .comment.new-comment, \
+.res-commentBoxes .comment .comment .comment .comment .comment.new-comment, \
+.res-commentBoxes .comment .comment .comment .comment .comment .comment .comment.new-comment, \
+.res-commentBoxes .comment .comment .comment .comment .comment .comment .comment .comment .comment.new-comment \
+{ background-color: #f2f8ff !important; border: solid 1px #d6e3f3 !important; } \
+\
+.res-commentBoxes .comment .comment.new-comment, \
+.res-commentBoxes .comment .comment .comment .comment.new-comment, \
+.res-commentBoxes .comment .comment .comment .comment .comment .comment.new-comment, \
+.res-commentBoxes .comment .comment .comment .comment .comment .comment .comment .comment.new-comment, \
+.res-commentBoxes .comment .comment .comment .comment .comment .comment .comment .comment .comment .comment.new-comment \
+{ background-color: #e5efff !important; border: solid 1px #cddaf3 !important; } \
+";
+
+	// Overwrite Reddit's default styling.
+	GM_addStyle(style);
+
+	function embed () {
+		// --- Settings
+		var threadTTL = 3 * 24 * 60 * 60 * 1000; // 3 Days
+
+		// --- Variables
+		var nowAtLoad = Date.now();
+		var lastVisitedAtLoad = null;
+
+		// --- Functions
+		var getThreadId = function () {
+			var element = document.querySelector('[rel="shorturl"]');
+			return !element ? null : "redd_id_" + element.href.substr(-6);
+		};
+
+		var setThreadLastVisited = function (id, t) {
+			localStorage.setItem(id, (typeof t === 'object' && t.getTime) ? t.getTime() : t);
+		};
+
+		var getThreadLastVisited = function (id) {
+			return parseInt(localStorage.getItem(id), 10);
+		};
+
+		var deleteThreadLastVisited = function (id) {
+			localStorage.removeItem(id);
+		};
+
+		var highlightNewCommentsSince = function (t) {
+			$('.comment').each(function (i, comment) {
+				comment = $(comment);
+				if (comment.hasClass('deleted')) return;
+				if (new Date(comment.find('.entry > .tagline > time').attr('datetime')) > t)
+					comment.addClass('new-comment');
+				else
+					comment.removeClass('new-comment');
+			});
+		};
+
+		var updateLastVisited = function () {
+			var id = getThreadId();
+			var threadLastVisited = getThreadLastVisited(id);
+			if (threadLastVisited)
+				highlightNewCommentsSince(threadLastVisited);
+			else
+				threadLastVisited = nowAtLoad;
+			setThreadLastVisited(id, nowAtLoad);
+			lastVisitedAtLoad = threadLastVisited;
+		};
+
+		var purgeExpiredData = function () {
+			var idRegex = /redd_id_([a-zA-Z0-9]{6})/;
+			Object.keys(localStorage).forEach(function (id) {
+				if (!idRegex.test(id)) return false;
+				if (nowAtLoad - threadTTL >= getThreadLastVisited(id)) deleteThreadLastVisited(id);
+			});
+		};
+		
+		var update = function () {
+			if (lastVisitedAtLoad)
+				highlightNewCommentsSince(lastVisitedAtLoad);
+			else
+				updateLastVisited();
+			purgeExpiredData();
+		};
+		
+		// --- Main
+		if (!getThreadId()) return;
+
+		// Wrap the function called when requesting more comments.
+		var morechildren_reddit = morechildren.__original__ || morechildren;
+		morechildren = function () {
+			morechildren_reddit.apply(this, arguments);
+			setTimeout(update, 1000);
+		};
+		morechildren.__original__ = morechildren_reddit;
+
+		update();
+	}
+
+	var inject = document.createElement("script");
+	inject.setAttribute("type", "text/javascript");
+	inject.appendChild(document.createTextNode("(" + embed + ")()"));
+	document.body.appendChild(inject);
